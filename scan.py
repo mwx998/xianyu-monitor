@@ -285,7 +285,7 @@ def main():
         else:
             low = min(lst, key=lambda x: x[0])[0]
             lines.append(f"- {f:g}元面值: 最低 ¥{low:g} | {len(lst)}条在售 | 最低折扣 {low/f*10:.1f}折")
-    valid = sorted([r for r in card_records], key=lambda r: r["discount"])
+    valid = sorted([r for r in card_records if "discount" in r and r["discount"] >= 0.5], key=lambda r: r["discount"])
     lines += ["", "### 最低折扣 TOP10（已过滤诈骗标记）"]
     n = 0
     for r in valid:
