@@ -172,13 +172,18 @@ def main():
             r = dict(rec); r["face"] = f; r["discount"] = price / f
             card_records.append(r)
 
-    # 与上轮 state 对比
-    prev = {}
-    if os.path.exists("state.json"):
-        try:
-            prev = {x["id"]: x for x in json.load(open("state.json", encoding="utf-8"))}
-        except Exception:
-            prev = {}
+    # 与上轮 state 对比(状态存在 last_report.md 尾部 HTML 注释里, 随报告一起被 workflow 提交持久化)
+    def load_state():
+        for src in ("state.json", "last_report.md"):
+            try:
+                txt = open(src, encoding="utf-8").read()
+                m = re.search(r'<!--STATE:(\{.*?\})-->', txt, re.S)
+                if m:
+                    return {x["id"]: x for x in json.loads(m.group(1))}
+            except Exception:
+                pass
+        return {}
+    prev = load_state()
     for r in card_records:
         pid = r["id"]
         if pid in prev:
@@ -188,8 +193,8 @@ def main():
             r["status"] = "新增"
     # 下架检测
     gone = [prev[i] for i in prev if i not in {r["id"] for r in card_records}]
-    json.dump([{ "id": r["id"], "price": r["price"], "title": r["title"][:50]} for r in card_records],
-              open("state.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    state_blob = json.dumps([{"id": r["id"], "price": r["price"], "title": r["title"][:50]} for r in card_records], ensure_ascii=False)
+    open("state.json", "w", encoding="utf-8").write(state_blob)  # 本地调试用
 
     # ===== 生成报告 =====
     lines = [f"## 闲鱼瑞幸礼品卡扫描 {now_str()}",
@@ -232,7 +237,7 @@ def main():
         push(f"瑞幸卡扫描简报 {now_str()}", brief)
 
     with open("last_report.md", "w", encoding="utf-8") as f:
-        f.write(report)
+        f.write(report + "\n<!--STATE:" + state_blob + "-->")
 
 if __name__ == "__main__":
     main()
