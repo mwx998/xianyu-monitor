@@ -243,7 +243,7 @@ def main():
             lines.append(f"- {f}元面值: 无在售")
         else:
             low = min(lst, key=lambda x: x[0])[0]
-            lines.append(f"- {f}元面值: 最低 ¥{low:g} | {len(lst)}条在售 | 最低折扣 {low/f*100:.1f}折")
+            lines.append(f"- {f}元面值: 最低 ¥{low:g} | {len(lst)}条在售 | 最低折扣 {low/f*10:.1f}折")
     valid = sorted([r for r in card_records], key=lambda r: r["discount"])
     lines += ["", "### 最低折扣 TOP10（已过滤诈骗标记）"]
     n = 0
@@ -251,13 +251,13 @@ def main():
         if r.get("scam"):
             continue
         n += 1
-        lines.append(f"- {r['discount']*100:.1f}折 | {r['face']}元卡 ¥{r['price']:g} | [{r['title'][:30]}]({r['url']}) | {r['status']}")
+        lines.append(f"- {r['discount']*10:.1f}折 | {r['face']}元卡 ¥{r['price']:g} | [{r['title'][:30]}]({r['url']}) | {r['status']}")
         if n >= 10:
             break
     if hits:
         lines += ["", "### 🎯 命中(≤8折)"]
         for r in hits:
-            lines.append(f"- [{r['face']}元卡 ¥{r['price']:g}（{r['discount']*100:.1f}折）]({r['url']})\n  {r['title']}")
+            lines.append(f"- [{r['face']}元卡 ¥{r['price']:g}（{r['discount']*10:.1f}折）]({r['url']})\n  {r['title']}")
     else:
         lines += ["", "### 🎯 命中(≤8折)", "- 本次无≤8折商品"]
     if gone:
@@ -280,7 +280,7 @@ def main():
             mark = "持平"
         else:
             mark = "⬇️降价"
-        return "| %s | [%s](%s) | %s元 | ¥%s | %.1f折 |" % (mark, r["title"][:20], r["url"], r["face"], r["price"], r["discount"]*100)
+        return "| %s | [%s](%s) | %s元 | ¥%s | %.1f折 |" % (mark, r["title"][:20], r["url"], r["face"], r["price"], r["discount"]*10)
 
     top_rows = [row_of(r) for r in valid if not r.get("scam")][:15]
     table = md_table(top_rows, ["标记", "标题", "面值", "售价", "折扣"]) if top_rows else "- 暂无在售礼品卡"
