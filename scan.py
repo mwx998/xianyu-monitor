@@ -228,13 +228,34 @@ def main():
     report = "\n".join(lines)
     print(report)
 
-    # 推送: 命中推全量; 无命中推简报
+    # 推送(Server酱 Markdown 表格样式)
+    def md_table(rows, header):
+        out = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
+        out.extend(rows)
+        return "\n".join(out)
+
+    def row_of(r):
+        if r.get("scam"):
+            mark = "🔴疑似诈骗"
+        elif r["status"] == "新增":
+            mark = "🆕新增"
+        elif r["status"] == "在售":
+            mark = "持平"
+        else:
+            mark = "⬇️降价"
+        return "| %s | [%s](%s) | %s元 | ¥%s | %.1f折 |" % (mark, r["title"][:20], r["url"], r["face"], r["price"], r["discount"]*100)
+
+    top_rows = [row_of(r) for r in valid if not r.get("scam")][:15]
+    table = md_table(top_rows, ["标记", "标题", "面值", "售价", "折扣"]) if top_rows else "- 暂无在售礼品卡"
+    header_info = ("检查时间: %s；结果: %s（扫描%d条，礼品卡/现金卡类%d条在售，登录态: %s）"
+                   % (now_str(), ("⚠️发现%d条≤8折商品" % len(hits)) if hits else "无≤8折商品", len(seen), len(card_records), "是" if logged_in else "否"))
     if hits:
-        push("🎯 瑞幸卡低价命中! %d条" % len(hits), report[:2800])
+        hit_rows = [row_of(r) for r in hits]
+        body = header_info + "\n\n### 🎯 命中(≤8折)\n" + md_table(hit_rows, ["标记", "标题", "面值", "售价", "折扣"]) + "\n\n### 在售最低折扣TOP15\n" + table
+        push("🎯 瑞幸卡低价命中! %d条" % len(hits), body[:2800])
     else:
-        brief = f"{now_str()} 扫描{len(seen)}条(礼品卡{len(card_records)}条)，无≤8折命中。\n" + \
-                "\n".join(f"{f}元: " + ("无在售" if not stats[f] else f"最低¥{min(x[0] for x in stats[f]):g}") for f in FACES)
-        push(f"瑞幸卡扫描简报 {now_str()}", brief)
+        body = header_info + "\n\n### 在售最低折扣TOP15\n" + table
+        push("瑞幸卡扫描简报 %s" % now_str(), body[:2800])
 
     with open("last_report.md", "w", encoding="utf-8") as f:
         f.write(report + "\n<!--STATE:" + state_blob + "-->")
