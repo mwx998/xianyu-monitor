@@ -21,12 +21,23 @@ SEARCH_URL = "https://www.goofish.com/search?q=%E7%91%9E%E5%B9%B8%20%E7%A4%BC%E5
 DISCOUNT_LINE = 0.8
 FACES = [10, 20, 30, 50, 100, 200]
 MAX_PAGES_DEFAULT = 4   # 默认排序翻页数
+MAX_PAGES_NEWEST = 2    # 新发布排序翻页数(优先抓新挂出的卡)
 MAX_PAGES_PRICE = 2     # 价格升序翻页数
 CST = timezone(timedelta(hours=8))
 SCAM_PAT = re.compile(r"(加好友|加我好友|看头像|直接拍价|私下交易|链接私信)", re.I)
 
 def now_str():
     return datetime.now(CST).strftime("%m-%d %H:%M")
+
+def trim_lines(text, limit):
+    """按行截断到 limit 字符内, 避免表格行被切一半"""
+    out, n = [], 0
+    for line in text.split("\n"):
+        if n + len(line) + 1 > limit:
+            break
+        out.append(line)
+        n += len(line) + 1
+    return "\n".join(out)
 
 def push(title, text):
     if not SCT_KEY:
@@ -170,7 +181,19 @@ def main():
 
         collect_pages(page, MAX_PAGES_DEFAULT, seen, all_cards)
 
-        # 价格升序再抓 2 页: 直接命中最低价商品
+        # 新发布排序再抓几页: 优先看到刚挂出的卡
+        try:
+            page.evaluate("""() => {
+              const t = [...document.querySelectorAll('span')]
+                .find(e => e.innerText.trim() === '新发布' && e.getBoundingClientRect().top < 200);
+              if (t) t.click();
+            }""")
+            time.sleep(5)
+            collect_pages(page, MAX_PAGES_NEWEST, seen, all_cards)
+        except Exception as e:
+            print("[WARN] 新发布排序失败:", e)
+
+        # 价格升序再抓几页: 直接命中最低价商品
         try:
             page.evaluate("""() => {
               const t = [...document.querySelectorAll('span')]
@@ -183,21 +206,27 @@ def main():
             print("[WARN] 价格排序失败:", e)
         browser.close()
 
-    # 解析礼品卡
+    # 解析礼品卡(按商品id去重, 同一商品只计一次)
+    seen_ids = set()
+    all_card_recs = []   # 所有识别为礼品卡的商品(含无面值)
     for it in all_cards:
         text = it["text"]
         low = text.replace(" ", "").replace("｜", "")
         is_card = ("礼品卡" in low or "现金卡" in low or "好运卡" in low) and ("瑞幸" in low or "luckin" in low.lower())
         if not is_card:
             continue
+        pid = it["href"].split("id=")[1].split("&")[0]
+        if pid in seen_ids:
+            continue
+        seen_ids.add(pid)
         face = face_value(low)
         price = parse_price(text)
         scam = bool(SCAM_PAT.search(low))
-        rec = {"id": it["href"].split("id=")[1].split("&")[0], "title": text[:70],
+        rec = {"id": pid, "title": text[:70],
                "url": it["href"], "price": price, "face": face, "scam": scam}
+        all_card_recs.append(rec)
         if face and price is not None:
             stats.setdefault(face, []).append((price, rec))
-        all_gift = rec
         if face and price and 0.5 <= price / face <= DISCOUNT_LINE and not scam:
             rec["discount"] = price / face
             hits.append(rec)
@@ -207,6 +236,11 @@ def main():
         for price, rec in lst:
             r = dict(rec); r["face"] = f; r["discount"] = price / f
             card_records.append(r)
+    # 面值/价格缺失的卡也纳入展示与状态对比
+    priced_ids = {r["id"] for r in card_records}
+    for rec in all_card_recs:
+        if rec["id"] not in priced_ids:
+            card_records.append(dict(rec))
 
     # 与上轮 state 对比(状态存在 last_report.md 尾部 HTML 注释里, 随报告一起被 workflow 提交持久化)
     def load_state():
@@ -224,26 +258,33 @@ def main():
         pid = r["id"]
         if pid in prev:
             op = prev[pid].get("price")
-            r["status"] = "降价%s→%.2f" % (op, r["price"]) if (op and r["price"] < op) else ("在售" if op == r["price"] else "涨价%s→%.2f" % (op, r["price"]))
+            if op is None or r["price"] is None:
+                r["status"] = "在售"
+            elif r["price"] < op:
+                r["status"] = "降价%s→%.2f" % (op, r["price"])
+            elif r["price"] == op:
+                r["status"] = "在售"
+            else:
+                r["status"] = "涨价%s→%.2f" % (op, r["price"])
         else:
             r["status"] = "新增"
     # 下架检测
-    gone = [prev[i] for i in prev if i not in {r["id"] for r in card_records}]
-    state_blob = json.dumps([{"id": r["id"], "price": r["price"], "title": r["title"][:50]} for r in card_records], ensure_ascii=False)
+    gone = [prev[i] for i in prev if i not in {r["id"] for r in all_card_recs}]
+    state_blob = json.dumps([{"id": r["id"], "price": r["price"], "title": r["title"][:50]} for r in all_card_recs], ensure_ascii=False)
     open("state.json", "w", encoding="utf-8").write(state_blob)  # 本地调试用
 
     # ===== 生成报告 =====
     lines = [f"## 闲鱼瑞幸礼品卡扫描 {now_str()}",
-             f"共扫描 {len(seen)} 条商品 | 礼品卡类 {len(card_records)} 条 | 登录态: {'是' if logged_in else '否(行情仅供粗筛参考)'}", ""]
+             f"共扫描 {len(seen)} 条商品 | 礼品卡类 {len(all_card_recs)} 条(可定价{len(priced_ids)}条) | 登录态: {'是' if logged_in else '否(行情仅供粗筛参考)'}", ""]
     lines.append("### 各面值行情(最低价/在售条数)")
     faces_show = FACES + sorted(set(stats) - set(FACES))
     for f in faces_show:
         lst = stats.get(f, [])
         if not lst:
-            lines.append(f"- {f}元面值: 无在售")
+            lines.append(f"- {f:g}元面值: 无在售")
         else:
             low = min(lst, key=lambda x: x[0])[0]
-            lines.append(f"- {f}元面值: 最低 ¥{low:g} | {len(lst)}条在售 | 最低折扣 {low/f*10:.1f}折")
+            lines.append(f"- {f:g}元面值: 最低 ¥{low:g} | {len(lst)}条在售 | 最低折扣 {low/f*10:.1f}折")
     valid = sorted([r for r in card_records], key=lambda r: r["discount"])
     lines += ["", "### 最低折扣 TOP10（已过滤诈骗标记）"]
     n = 0
@@ -289,10 +330,10 @@ def main():
     if hits:
         hit_rows = [row_of(r) for r in hits]
         body = header_info + "\n\n### 🎯 命中(≤8折)\n" + md_table(hit_rows, ["标记", "标题", "面值", "售价", "折扣"]) + "\n\n### 在售最低折扣TOP15\n" + table
-        push("🎯 瑞幸卡低价命中! %d条" % len(hits), body[:2800])
+        push("🎯 瑞幸卡低价命中! %d条" % len(hits), trim_lines(body, 2800))
     else:
         body = header_info + "\n\n### 在售最低折扣TOP15\n" + table
-        push("瑞幸卡扫描简报 %s" % now_str(), body[:2800])
+        push("瑞幸卡扫描简报 %s" % now_str(), trim_lines(body, 2800))
 
     with open("last_report.md", "w", encoding="utf-8") as f:
         f.write(report + "\n<!--STATE:" + state_blob + "-->")
