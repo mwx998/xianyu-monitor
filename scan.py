@@ -23,7 +23,7 @@ FACES = [10, 20, 30, 50, 100, 200]
 MAX_PAGES_DEFAULT = 4   # 默认排序翻页数
 MAX_PAGES_PRICE = 2     # 价格升序翻页数
 CST = timezone(timedelta(hours=8))
-SCAM_PAT = re.compile(r"(vx|vx号|weixin|微信|加好友|加我|私聊|直接拍价|看头像)", re.I)
+SCAM_PAT = re.compile(r"(加好友|加我好友|看头像|直接拍价|私下交易|链接私信)", re.I)
 
 def now_str():
     return datetime.now(CST).strftime("%m-%d %H:%M")
@@ -51,33 +51,69 @@ EXTRACT_JS = """
 """
 
 def parse_price(text):
-    # 取“价格段”（第二个 | 段附近）里的数字
-    parts = text.split('|')
-    seg = parts[1] if len(parts) > 1 else text
-    m = re.search(r'(\d+(?:\.\d+)?)', seg)
-    if m:
-        v = float(m.group(1))
-        if 0.5 <= v <= 3000:
-            return v
+    # 价格紧跟在 ¥ 后面，但可能被竖线拆成多个 token（如 "¥ | 18 | .90"）
+    seg = re.search(r'¥([^¥]{0,30})', text)
+    if seg:
+        tokens = [x.strip() for x in seg.group(1).split('|')]
+        int_part = dec_part = None
+        for tok in tokens:
+            if int_part is None:
+                if re.fullmatch(r'\d+', tok):
+                    int_part = tok
+                elif re.fullmatch(r'\d+\.\d+', tok):
+                    v = float(tok)
+                    return v if 0.5 <= v <= 3000 else None
+            elif re.fullmatch(r'\.\d+', tok):
+                dec_part = tok[1:]
+                break
+            elif tok:
+                break
+        if int_part:
+            v = float(int_part + ('.' + dec_part if dec_part else ''))
+            if 0.5 <= v <= 3000:
+                return v
+    # 兜底：任意段里的独立小数价格（如 9.9）
+    for p in text.split('|'):
+        m = re.fullmatch(r'\s*(\d+\.\d+)\s*', p)
+        if m:
+            v = float(m.group(1))
+            if 0.5 <= v <= 3000:
+                return v
     return None
 
 FACE_SET = (10, 20, 30, 50, 100, 200)
 
 def face_value(text):
-    """从标题中识别礼品卡面值。
-    提取所有“N元/面值N”写法中的候选面值:
-    - 唯一面值 → 返回该面值
-    - 多个不同面值(多面值合售) → 返回 None, 避免误算折扣"""
+    """从标题中识别礼品卡面值，覆盖常见写法：
+    面值N / N元面值 / N元礼品卡 / N礼品卡 / 礼品卡N / 礼品卡 N两张 / 礼品券，N元
+    多个不同面值(多面值合售) → 返回 None, 避免误算折扣"""
     cands = set()
+    text = re.sub(r'\d+(?:\.\d+)?折', '', text)  # 剔除折扣数字，避免"面值93折"混入
     # 面值N 或 面值N,M,... 列表写法
-    for m in re.finditer(r'面值\s*((?:10|20|30|50|100|200)(?:\s*[,，/]\s*(?:10|20|30|50|100|200))*)(?!\d)', text):
-        for v in re.findall(r'10|20|30|50|100|200', m.group(1)):
-            cands.add(int(v))
-    for m in re.finditer(r'(10|20|30|50|100|200)\s*(?:元|块)(?:面值)?', text):
-        cands.add(int(m.group(1)))
-    cands = {c for c in cands if c in FACE_SET}
+    for m in re.finditer(r'面值\s*((?:\d+(?:\.\d+)?)(?:\s*[,，/]\s*\d+(?:\.\d+)?)*)', text):
+        for v in re.findall(r'\d+(?:\.\d+)?', m.group(1)):
+            cands.add(float(v))
+    # N元面值 / N面值 / N面额
+    for m in re.finditer(r'(\d+(?:\.\d+)?)\s*面[值额]', text):
+        cands.add(float(m.group(1)))
+    # N元礼品卡/现金卡/礼品券（数字在前）
+    for m in re.finditer(r'(\d+(?:\.\d+)?)\s*元?\s*(?:礼品卡|现金卡|好运卡)', text):
+        cands.add(float(m.group(1)))
+    # 礼品卡N / 礼品卡 N两张（"两张"是数量）
+    m = re.search(r'(?:礼品卡|现金卡|好运卡)\s*(\d+(?:\.\d+)?)(?!\.?\d*折)', text)
+    if m:
+        cands.add(float(m.group(1)))
+    # 礼品卡/礼品券 后最近的 "N元"
+    m = re.search(r'(?:礼品卡|现金卡|好运卡|礼品券)([^|]{0,40}?(\d+(?:\.\d+)?)\s*元)', text)
+    if m:
+        cands.add(float(m.group(2)))
+    # 限定合理面值范围 5~500
+    cands = {c for c in cands if 5 <= c <= 500}
     if len(cands) == 1:
         return cands.pop()
+    if len(cands) > 1:
+        # "10元 11元 36元 50元 66元 70元礼品卡" 这类多面值合售 → 无法定面值
+        return None
     return None
 
 def goto_page(page, n):
@@ -160,9 +196,9 @@ def main():
         rec = {"id": it["href"].split("id=")[1].split("&")[0], "title": text[:70],
                "url": it["href"], "price": price, "face": face, "scam": scam}
         if face and price is not None:
-            stats[face].append((price, rec))
+            stats.setdefault(face, []).append((price, rec))
         all_gift = rec
-        if face and price and price / face <= DISCOUNT_LINE and not scam:
+        if face and price and 0.5 <= price / face <= DISCOUNT_LINE and not scam:
             rec["discount"] = price / face
             hits.append(rec)
     # 全部礼品卡记录(带面值和价)
@@ -200,8 +236,9 @@ def main():
     lines = [f"## 闲鱼瑞幸礼品卡扫描 {now_str()}",
              f"共扫描 {len(seen)} 条商品 | 礼品卡类 {len(card_records)} 条 | 登录态: {'是' if logged_in else '否(行情仅供粗筛参考)'}", ""]
     lines.append("### 各面值行情(最低价/在售条数)")
-    for f in FACES:
-        lst = stats[f]
+    faces_show = FACES + sorted(set(stats) - set(FACES))
+    for f in faces_show:
+        lst = stats.get(f, [])
         if not lst:
             lines.append(f"- {f}元面值: 无在售")
         else:
