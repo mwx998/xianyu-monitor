@@ -315,9 +315,9 @@ def main():
     def row_of(r):
         if r.get("scam"):
             mark = "🔴疑似诈骗"
-        elif r["status"] == "新增":
+        elif r.get("status") == "新增":
             mark = "🆕新增"
-        elif r["status"] == "在售":
+        elif r.get("status") == "在售":
             mark = "持平"
         else:
             mark = "⬇️降价"
