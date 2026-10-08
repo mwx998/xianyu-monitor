@@ -114,32 +114,33 @@ def face_value(text):
     m = re.search(r'(?:礼品卡|现金卡|好运卡)\s*(\d+(?:\.\d+)?)(?!\.?\d*折)', text)
     if m:
         cands.add(float(m.group(1)))
-    # 礼品卡/礼品券 后最近的 "N元"
-    m = re.search(r'(?:礼品卡|现金卡|好运卡|礼品券)([^|]{0,40}?(\d+(?:\.\d+)?)\s*元)', text)
+    # 礼品卡/礼品券 后紧邻的 "N元"（不允许跨过另一个N元，避免把多张打包的总额混入）
+    m = re.search(r'(?:礼品卡|现金卡|好运卡|礼品券)\s*(\d+(?:\.\d+)?)\s*元', text)
     if m:
-        cands.add(float(m.group(2)))
-    # 多面值合售(如“10元20元50元礼品卡”) → 无法定面值, 跳过
-    if len(cands) > 1:
+        cands.add(float(m.group(1)))
+    # 多张打包优先判定：有“N张”时用总面值（共N元/打包N元优先，否则单价×张数）
+    m_qty = re.search(r'(\d+|两|二|三|四|五|六|七|八|九|十)\s*张', text)
+    if m_qty:
+        cn = {'两':2,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10}
+        q = m_qty.group(1)
+        qty = cn.get(q) or int(q)
+        if qty > 1:
+            m_total = re.search(r'(?:共|合计|打包)\s*(\d+(?:\.\d+)?)\s*元', text)
+            if m_total:
+                v = float(m_total.group(1))
+                return v if 5 <= v <= 2000 else None
+            base = [c for c in cands if 5 <= c <= 500]
+            if len(base) == 1:
+                return base[0] * qty
+            return None
+        return None  # “1张/单张”等表述不改变逻辑，走下面的常规判定
+    # 相邻多面值（如“10元20元”“100元300元两种”）→ 歧义，跳过
+    vals = set(re.findall(r'(\d+(?:\.\d+)?)\s*元', text))
+    if len(vals) > 1:
         return None
+    cands = {c for c in cands if 5 <= c <= 500}
     if len(cands) == 1:
-        face = cands.pop()
-        # 多张打包: "100元3张" / "50元8张共400元" / "两张" 等写法 → 用总面值
-        m_qty = re.search(r'(\d+|两|二|三|四|五|六|七|八|九|十)\s*张', text)
-        if m_qty:
-            cn = {'两':2,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10}
-            q = m_qty.group(1)
-            qty = cn.get(q) or int(q)
-            if qty > 1:
-                # 标题明示总面值("共N元/打包N元")优先
-                m_total = re.search(r'(?:共|合计|打包)\s*(\d+(?:\.\d+)?)\s*元', text)
-                if m_total:
-                    return float(m_total.group(1))
-                return face * qty
-        # 无数量词时, 明示总价“共N元”且与单价面值不同则按总价
-        return face
-    if len(cands) > 1:
-        # "10元 11元 36元 50元 66元 70元礼品卡" 这类多面值合售 → 无法定面值
-        return None
+        return cands.pop()
     return None
 
 def goto_page(page, n):
