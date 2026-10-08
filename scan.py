@@ -118,10 +118,25 @@ def face_value(text):
     m = re.search(r'(?:礼品卡|现金卡|好运卡|礼品券)([^|]{0,40}?(\d+(?:\.\d+)?)\s*元)', text)
     if m:
         cands.add(float(m.group(2)))
-    # 限定合理面值范围 5~500
-    cands = {c for c in cands if 5 <= c <= 500}
+    # 多面值合售(如“10元20元50元礼品卡”) → 无法定面值, 跳过
+    if len(cands) > 1:
+        return None
     if len(cands) == 1:
-        return cands.pop()
+        face = cands.pop()
+        # 多张打包: "100元3张" / "50元8张共400元" / "两张" 等写法 → 用总面值
+        m_qty = re.search(r'(\d+|两|二|三|四|五|六|七|八|九|十)\s*张', text)
+        if m_qty:
+            cn = {'两':2,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10}
+            q = m_qty.group(1)
+            qty = cn.get(q) or int(q)
+            if qty > 1:
+                # 标题明示总面值("共N元/打包N元")优先
+                m_total = re.search(r'(?:共|合计|打包)\s*(\d+(?:\.\d+)?)\s*元', text)
+                if m_total:
+                    return float(m_total.group(1))
+                return face * qty
+        # 无数量词时, 明示总价“共N元”且与单价面值不同则按总价
+        return face
     if len(cands) > 1:
         # "10元 11元 36元 50元 66元 70元礼品卡" 这类多面值合售 → 无法定面值
         return None
