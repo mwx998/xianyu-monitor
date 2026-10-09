@@ -193,7 +193,14 @@ def main():
         body = page.evaluate("() => document.body.innerText.slice(0, 500)")
         logged_in = "订单" in body and not re.search(r"\n登录\n", body)
         if COOKIE and not logged_in:
-            push("⚠️ 闲鱼Cookie已过期", f"{now_str()} 云端检测到登录态失效，行情可能失真，请更新 XY_COOKIE Secret。")
+            # 每天(北京时间)最多提醒一次, 避免每15分钟轰炸
+            today = datetime.now(CST).strftime("%Y-%m-%d")
+            last_warn = ""
+            if os.path.exists("cookie_warn_date.txt"):
+                last_warn = open("cookie_warn_date.txt", encoding="utf-8").read().strip()
+            if last_warn != today:
+                push("⚠️ 闲鱼Cookie已过期", f"{now_str()} 云端检测到登录态失效，行情可能失真，请重新导出 Cookie 并更新 XY_COOKIE Secret。")
+                open("cookie_warn_date.txt", "w", encoding="utf-8").write(today)
 
         collect_pages(page, MAX_PAGES_DEFAULT, seen, all_cards)
 
