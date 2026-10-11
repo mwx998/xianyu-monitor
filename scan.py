@@ -192,6 +192,18 @@ def main():
         time.sleep(8)
         body = page.evaluate("() => document.body.innerText.slice(0, 500)")
         logged_in = "订单" in body and not re.search(r"\n登录\n", body)
+        # 首屏慢加载/滑块验证会造成瞬时误判, 重试2次确认
+        for _retry in range(2):
+            if logged_in:
+                break
+            time.sleep(6)
+            try:
+                page.reload(wait_until="domcontentloaded")
+                time.sleep(6)
+                body = page.evaluate("() => document.body.innerText.slice(0, 500)")
+                logged_in = "订单" in body and not re.search(r"\n登录\n", body)
+            except Exception:
+                pass
         if COOKIE and not logged_in:
             # 每天(北京时间)最多提醒一次, 避免每15分钟轰炸
             today = datetime.now(CST).strftime("%Y-%m-%d")
