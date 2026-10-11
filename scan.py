@@ -105,8 +105,11 @@ def face_value(text):
         for v in re.findall(r'\d+(?:\.\d+)?', m.group(1)):
             cands.add(float(v))
     # N元面值 / N面值 / N面额
-    for m in re.finditer(r'(\d+(?:\.\d+)?)\s*面[值额]', text):
+    for m in re.finditer(r'(\d+(?:\.\d+)?)\s*元?\s*面[值额]', text):
         cands.add(float(m.group(1)))
+    # "10/20礼品卡" 斜杠多面值 → 歧义
+    if re.search(r'\d+(?:\.\d+)?\s*/\s*\d+(?:\.\d+)?\s*元?\s*(?:礼品卡|现金卡|好运卡|礼品券)', text):
+        return None
     # N元礼品卡/现金卡/礼品券（数字在前）
     for m in re.finditer(r'(\d+(?:\.\d+)?)\s*元?\s*(?:礼品卡|现金卡|好运卡)', text):
         cands.add(float(m.group(1)))
@@ -115,7 +118,7 @@ def face_value(text):
     if m:
         cands.add(float(m.group(1)))
     # 礼品卡/礼品券 后紧邻的 "N元"（不允许跨过另一个N元，避免把多张打包的总额混入）
-    m = re.search(r'(?:礼品卡|现金卡|好运卡|礼品券)\s*(\d+(?:\.\d+)?)\s*元', text)
+    m = re.search(r'(?:礼品卡|现金卡|好运卡|礼品券)[，,、:\s]*(\d+(?:\.\d+)?)\s*元', text)
     if m:
         cands.add(float(m.group(1)))
     # 多张打包优先判定：有“N张”时用总面值（共N元/打包N元优先，否则单价×张数）
@@ -133,7 +136,7 @@ def face_value(text):
             if len(base) == 1:
                 return base[0] * qty
             return None
-        return None  # “1张/单张”等表述不改变逻辑，走下面的常规判定
+        # “1张/单张”等表述不改变逻辑，落入下方常规判定
     # 相邻多面值（如“10元20元”“100元300元两种”）→ 歧义，跳过
     vals = set(re.findall(r'(\d+(?:\.\d+)?)\s*元', text))
     if len(vals) > 1:
