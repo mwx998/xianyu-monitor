@@ -285,7 +285,7 @@ def main():
         for src in ("state.json", "last_report.md"):
             try:
                 txt = open(src, encoding="utf-8").read()
-                m = re.search(r'<!--STATE:(\{.*?\})-->', txt, re.S)
+                m = re.search(r'<!--STATE:(\[.*?\])-->', txt, re.S)
                 if m:
                     return {x["id"]: x for x in json.loads(m.group(1))}
             except Exception:
