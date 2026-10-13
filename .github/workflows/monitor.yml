@@ -1,9 +1,9 @@
 name: Xianyu Luckin Card Monitor
 
 on:
-  schedule:
-    - cron: "0 * * * *"   # 每小时整点执行(GitHub排队可能有几分钟延迟)
-  workflow_dispatch:          # 支持手动触发测试
+  # schedule:   # 监控已停用, 需要恢复时取消下面两行注释
+  #   - cron: "0 * * * *"
+  workflow_dispatch:          # 仅手动触发
 
 permissions:
   contents: write
